@@ -1,0 +1,618 @@
+import 'dart:io';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart';
+
+void main() {
+  runApp(MyApp());
+}
+
+class Passenger {
+  final String name;
+  final String passportNumber;
+  final String dateOfIssue;
+  final String dateOfVisa;
+  final bool paid;
+  final File passportImage;
+
+  Passenger({
+    this.name,
+    this.passportNumber,
+    this.dateOfIssue,
+    this.dateOfVisa,
+    this.paid,
+    this.passportImage,
+  });
+
+  factory Passenger.fromJson(Map<String, dynamic> json) {
+    return Passenger(
+      name: json['name'],
+      passportNumber: json['passportNumber'],
+      dateOfIssue: json['dateOfIssue'],
+      dateOfVisa: json['dateOfVisa'],
+      paid: json['paid'],
+      passportImage: json['passportImage'] != null
+          ? File.fromUri(Uri.parse(json['passportImage']))
+          : null,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'passportNumber': passportNumber,
+      'dateOfIssue': dateOfIssue,
+      'dateOfVisa': dateOfVisa,
+      'paid': paid,
+      'passportImage': passportImage?.uri.toString(),
+    };
+  }
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Travel Agency App',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: HomePage(),
+    );
+  }
+}
+
+class HomePage extends StatefulWidget {
+  @override
+  _HomePageState createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final List<Passenger> _passengers = [];
+  final TextEditingController _searchController = TextEditingController();
+  List<Passenger> _searchResults = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPassengers();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _savePassengers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final passengerList = _passengers.map((p) => p.toJson()).toList();
+    await prefs.setString('passengers', json.encode(passengerList));
+  }
+
+  Future<void> _loadPassengers() async {
+    final prefs = await SharedPreferences.getInstance();
+    final passengerListJson = prefs.getString('passengers');
+    if (passengerListJson != null) {
+      final passengerList = json.decode(passengerListJson) as List<dynamic>;
+      setState(() {
+        _passengers.clear();
+        _passengers.addAll(passengerList.map((p) => Passenger.fromJson(p)));
+      });
+    }
+  }
+
+  void _addPassenger(Passenger passenger) {
+    setState(() {
+      _passengers.add(passenger);
+    });
+    _savePassengers();
+  }
+
+  void _updatePassenger(Passenger oldPassenger, Passenger newPassenger) {
+    setState(() {
+      final index = _passengers.indexOf(oldPassenger);
+      _passengers[index] = newPassenger;
+    });
+    _savePassengers();
+  }
+
+  void _deletePassenger(Passenger passenger) {
+    setState(() {
+      _passengers.remove(passenger);
+    });
+    _savePassengers();
+  }
+
+  Future<Passenger> _showPassengerDialog({Passenger passenger}) async {
+    final result = await showDialog<Passenger>(
+      context: context,
+      builder: (BuildContext context) {
+        return PassengerDialog(passenger: passenger);
+      },
+    );
+    if (result != null) {
+      if (passenger != null) {
+        _updatePassenger(passenger, result);
+      } else {
+        _addPassenger(result);
+      }
+    }
+  }
+
+  void _searchPassengers(String query) {
+    setState(() {
+      _searchResults = _passengers
+          .where((p) =>
+              p.name.toLowerCase().contains(query.toLowerCase()) ||
+              p.passportNumber.contains(query))
+          .toList();
+    });
+  }
+
+  Widget _buildSearchBar() {
+    return TextField(
+      controller: _searchController,
+      decoration: InputDecoration(
+        hintText: 'Search by name or passport number',
+        suffixIcon: IconButton(
+          icon: Icon(Icons.clear),
+          onPressed: () {
+            _searchController.clear();
+            _searchPassengers('');
+          },
+        ),
+      ),
+      onChanged: (value) {
+        _searchPassengers(value);
+      },
+    );
+  }
+
+  Widget _buildPassengerCard(Passenger passenger) {
+    return Card(
+      child: ListTile(
+        leading: passenger.passportImage != null
+            ? CircleAvatar(
+                backgroundImage: FileImage(passenger.passportImage),
+              )
+            : CircleAvatar(
+                child: Icon(Icons.person),
+              ),
+        title: Text(passenger.name),
+        subtitle: Text(passenger.passportNumber),
+        trailing: IconButton(
+          icon: Icon(Icons.delete),
+          onPressed: () {
+            _deletePassenger(passenger);
+          },
+        ),
+        onTap: () {
+          _showPassengerDialog(passenger: passenger);
+        },
+      ),
+    );
+  }
+
+  Widget _buildPassengersList() {
+    if (_searchController.text.isNotEmpty) {
+      return ListView.builder(
+        itemCount: _searchResults.length,
+        itemBuilder: (BuildContext context, int index) {
+          final passenger = _searchResults[index];
+          return _buildPassengerCard(passenger);
+        },
+      );
+    } else {
+      return ListView.builder(
+        itemCount: _passengers.length,
+        itemBuilder: (BuildContext context, int index) {
+          final passenger = _passengers[index];
+          return _buildPassengerCard(passenger);
+        },
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Passengers'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.add),
+            onPressed: () {
+              _showPassengerDialog();
+            },
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: _buildSearchBar(),
+          ),
+          Expanded(
+            child: _buildPassengersList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PassengerDialog extends StatefulWidget {
+  final Passenger passenger;
+
+  PassengerDialog({this.passenger});
+
+  @override
+  _PassengerDialogState createState() => _PassengerDialogState();
+}
+
+class _PassengerDialogState extends State<PassengerDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _passportNumberController =
+      TextEditingController();
+  final TextEditingController _dateOfIssueController = TextEditingController();
+  final TextEditingController _dateOfVisaController = TextEditingController();
+  File _passportImage;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.passenger != null) {
+      _nameController.text = widget.passenger.name;
+      _passportNumberController.text = widget.passenger.passportNumber;
+      _dateOfIssueController.text = widget.passenger.dateOfIssue;
+      _dateOfVisaController.text = widget.passenger.dateOfVisa;
+      _passportImage = widget.passenger.passportImage;
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _passportNumberController.dispose();
+    _dateOfIssueController.dispose();
+    _dateOfVisaController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _selectDate(
+      BuildContext context, TextEditingController controller) async {
+    final DateTime picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(1900),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) {
+      controller.text = DateFormat.yMd().format(picked);
+    }
+  }
+
+  Future<void> _selectImage() async {
+    final pickedFile =
+        await ImagePicker().getImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _passportImage = File(pickedFile.path);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title:
+          Text(widget.passenger != null ? 'Edit Passenger' : 'Add Passenger'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _nameController,
+              validator: (value) {
+                if (value.isEmpty) {
+                  return 'Please enter passenger name';
+                }
+                return null;
+              },
+              decoration: InputDecoration(labelText: 'Name'),
+            ),
+            TextFormField(
+              controller: _passportNumberController,
+              validator: (value) {
+                if (value.isEmpty) {
+                  return 'Please enter passport number';
+                }
+                return null;
+              },
+              decoration: InputDecoration(labelText: 'Passport Number'),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _dateOfIssueController,
+                    readOnly: true,
+                    validator: (value) {
+                      if (value.isEmpty) {
+                        return 'Please enter date of issue';
+                      }
+                      return null;
+                    },
+                    decoration: InputDecoration(labelText: 'Date of Issue'),
+                    onTap: () {
+                      _selectDate(context, _dateOfIssueController);
+                    },
+                  ),
+                ),
+                SizedBox(width: 16),
+                Expanded(
+                  child: TextFormField(
+                    controller: _dateOfVisaController,
+                    readOnly: true,
+                    validator: (value) {
+                      if (value.isEmpty) {
+                        return 'Please enter date of visa';
+                      }
+                      return null;
+                    },
+                    decoration: InputDecoration(labelText: 'Date of Visa'),
+                    onTap: () {
+                      _selectDate(context, _dateOfVisaController);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 16.0),
+                    child: Text('Passport Image'),
+                  ),
+                ),
+                SizedBox(width: 16),
+                Expanded(
+                  child: _passportImage != null
+                      ? Image.file(_passportImage)
+                      : IconButton(
+                          icon: Icon(Icons.add_a_photo),
+                          onPressed: _selectImage,
+                        ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: Text('Cancel'),
+          onPressed: () {
+            Navigator.of(context).pop();
+          },
+        ),
+        TextButton(
+          child: Text(widget.passenger != null ? 'Save' : 'Add'),
+          onPressed: () {
+            if (_formKey.currentState.validate()) {
+              final passenger = Passenger(
+                name: _nameController.text,
+                passportNumber: _passportNumberController.text,
+                dateOfIssue: _dateOfIssueController.text,
+                dateOfVisa: _dateOfVisaController.text,
+                passportImage: _passportImage,
+              );
+              Navigator.of(context).pop(passenger);
+            }
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class PassengerPage extends StatefulWidget {
+  final Passenger passenger;
+
+  const PassengerPage({Key key, this.passenger}) : super(key: key);
+
+  @override
+  _PassengerPageState createState() => _PassengerPageState();
+}
+
+class _PassengerPageState extends State<PassengerPage> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _passportNumberController =
+      TextEditingController();
+  final TextEditingController _dateOfIssueController = TextEditingController();
+  final TextEditingController _dateOfVisaController = TextEditingController();
+  bool _paid = false;
+  File _passportImage;
+
+  @override
+  void initState() {
+    if (widget.passenger != null) {
+      _nameController.text = widget.passenger.name;
+      _passportNumberController.text = widget.passenger.passportNumber;
+      _dateOfIssueController.text = widget.passenger.dateOfIssue;
+      _dateOfVisaController.text = widget.passenger.dateOfVisa;
+      _paid = widget.passenger.paid;
+      _passportImage = widget.passenger.passportImage;
+    }
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _passportNumberController.dispose();
+    _dateOfIssueController.dispose();
+    _dateOfVisaController.dispose();
+    super.dispose();
+  }
+
+  void _selectPassportImage() async {
+    final pickedFile =
+        await ImagePicker().getImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        _passportImage = File(pickedFile.path);
+      });
+    }
+  }
+
+  void _savePassenger() {
+    if (_formKey.currentState.validate()) {
+      final passenger = Passenger(
+        name: _nameController.text,
+        passportNumber: _passportNumberController.text,
+        dateOfIssue: _dateOfIssueController.text,
+        dateOfVisa: _dateOfVisaController.text,
+        paid: _paid,
+        passportImage: _passportImage,
+      );
+      Navigator.pop(context, passenger);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title:
+            Text(widget.passenger == null ? 'Add Passenger' : 'Edit Passenger'),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextFormField(
+                controller: _nameController,
+                validator: (value) {
+                  if (value.isEmpty) {
+                    return 'Please enter passenger name';
+                  }
+                  return null;
+                },
+                decoration: InputDecoration(
+                  labelText: 'Passenger name',
+                ),
+              ),
+              TextFormField(
+                controller: _passportNumberController,
+                validator: (value) {
+                  if (value.isEmpty) {
+                    return 'Please enter passport number';
+                  }
+                  return null;
+                },
+                decoration: InputDecoration(
+                  labelText: 'Passport number',
+                ),
+              ),
+              TextFormField(
+                controller: _dateOfIssueController,
+                validator: (value) {
+                  if (value.isEmpty) {
+                    return 'Please enter date of issue';
+                  }
+                  return null;
+                },
+                decoration: InputDecoration(
+                  labelText: 'Date of issue',
+                ),
+              ),
+              TextFormField(
+                controller: _dateOfVisaController,
+                validator: (value) {
+                  if (value.isEmpty) {
+                    return 'Please enter date of visa';
+                  }
+                  return null;
+                },
+                decoration: InputDecoration(
+                  labelText: 'Date of visa',
+                ),
+              ),
+              Row(
+                children: [
+                  Checkbox(
+                    value: _paid,
+                    onChanged: (value) {
+                      setState(() {
+                        _paid = value;
+                      });
+                    },
+                  ),
+                  Text('Paid'),
+                ],
+              ),
+              SizedBox(height: 16.0),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Colors.grey,
+                      ),
+                    ),
+                    child: _passportImage == null
+                        ? ElevatedButton.icon(
+                            onPressed: _selectPassportImage,
+                            icon: Icon(Icons.camera_alt),
+                            label: Text('Add passport image'),
+                          )
+                        : Image.file(
+                            _passportImage,
+                            width: 120.0,
+                            height: 120.0,
+                            fit: BoxFit.cover,
+                          ),
+                  ),
+                ],
+              ),
+              SizedBox(height: 16.0),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _savePassenger,
+                      child: Text('Save'),
+                    ),
+                  ),
+                  SizedBox(width: 16.0),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                      },
+                      child: Text('Cancel'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
